@@ -1,0 +1,11 @@
+services:
+  streamlit:
+    build:
+      context: .
+      dockerfile: Dockerfile.streamlit
+    image: cleaning-laravelmail-streamlit:local
+    ports:
+      - "8501:8501"
+    environment:
+      STREAMLIT_MAX_CONCURRENT: "8"
+    restart: unless-stopped
