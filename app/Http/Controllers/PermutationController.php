@@ -1,0 +1,3 @@
+<?php
+namespace App\Http\Controllers;use App\Http\Requests\PermutationRequest;use App\Services\PermutationService;use Illuminate\Http\JsonResponse;
+final readonly class PermutationController {public function __construct(private PermutationService $permutations,private ValidationController $validation){}public function __invoke(PermutationRequest $request):JsonResponse{$d=$request->validated();$emails=$this->permutations->generate($d['first_name'],$d['last_name'],$d['domain'],$d['nickname']??null);$results=($d['validate']??false)?array_map(fn(string $e):array=>$this->validation->one($e,$d),$emails):null;return response()->json(['ok'=>true,'data'=>['emails'=>$emails,'results'=>$results]]);}}

@@ -1,0 +1,8 @@
+/vendor/
+.env.v2
+/storage/logs/*.log
+/storage/framework/cache/data/*
+/storage/framework/sessions/*
+/storage/framework/views/*
+/storage/app/v2/imports/*
+/storage/app/v2/exports/*
