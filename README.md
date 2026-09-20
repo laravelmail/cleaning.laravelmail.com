@@ -76,3 +76,27 @@ docker build -t validation-laravel-v2 .
 ## Scheduling and queues
 
 The Streamlit source had no cron-triggered business task. Laravel's scheduler is therefore intentionally empty rather than inventing behavior. The test-email action is a queueable job but is dispatched synchronously to preserve the source UI's immediate success/error response. It can be changed to `dispatch()` without changing the job when asynchronous sending is wanted.
+
+## Streamlit Cloud UI
+
+The repository also includes `streamlit_app.py`, the entry point Streamlit Community Cloud expects. It preserves the supplied Streamlit app as a standalone UI: validation, CSV/Gmail batches, provider extraction, permutations, SMTP checks, WHOIS/domain age, catch-all checks, scoring and test sending all run inside the Streamlit process.
+
+This is intentionally not a thin client for the Laravel API. The supplied UI includes long-running batch progress, stop controls, uploads and SMTP sender settings that are stateful in the Streamlit session, while the Laravel API is a separate deployable interface. Keeping the UI standalone preserves the original behavior and lets Streamlit Cloud run it without requiring a second deployment.
+
+### Deploy
+
+1. In Streamlit Community Cloud, select `laravelmail/cleaning.laravelmail.com`.
+2. Set the branch to `main` after this change is merged.
+3. Set the entry point to `streamlit_app.py`.
+4. Deploy. Streamlit installs `requirements.txt` and uses the Python version in `runtime.txt`.
+
+Local run:
+
+```bash
+python -m venv .venv
+. .venv/bin/activate
+pip install -r requirements.txt
+streamlit run streamlit_app.py
+```
+
+No secret is committed. SMTP credentials are entered at runtime in the Streamlit UI. Streamlit Cloud does not need Laravel's `.env.v2` to run this standalone UI.
