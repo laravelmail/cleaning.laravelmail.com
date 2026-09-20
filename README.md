@@ -72,3 +72,7 @@ Responses are always JSON. Success uses `{"ok":true,"data":...}`. Errors use `{"
 composer test
 docker build -t validation-laravel-v2 .
 ```
+
+## Scheduling and queues
+
+The Streamlit source had no cron-triggered business task. Laravel's scheduler is therefore intentionally empty rather than inventing behavior. The test-email action is a queueable job but is dispatched synchronously to preserve the source UI's immediate success/error response. It can be changed to `dispatch()` without changing the job when asynchronous sending is wanted.

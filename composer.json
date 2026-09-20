@@ -6,7 +6,7 @@
     "php": "^8.3",
     "laravel/framework": "^12.0",
     "laravel/tinker": "^2.10",
-    "io-developer/php-whois": "^4.2",
+    "io-developer/php-whois": "^4.1",
     "jeremykendall/php-domain-parser": "^6.4",
     "symfony/dotenv": "^7.2"
   },
@@ -40,5 +40,6 @@
     "sort-packages": true
   },
   "minimum-stability": "stable",
-  "prefer-stable": true
+  "prefer-stable": true,
+  "license": "MIT"
 }
