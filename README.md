@@ -100,3 +100,26 @@ streamlit run streamlit_app.py
 ```
 
 No secret is committed. SMTP credentials are entered at runtime in the Streamlit UI. Streamlit Cloud does not need Laravel's `.env.v2` to run this standalone UI.
+
+### Docker and Make
+
+```bash
+make streamlit-up       # builds and starts http://localhost:8501
+make streamlit-logs     # follow startup/runtime logs
+make streamlit-down     # stop it
+```
+
+Or without Docker: `make install && make streamlit`.
+
+The Streamlit image is isolated in `Dockerfile.streamlit`; the existing `Dockerfile` remains the Laravel API image. `STREAMLIT_MAX_CONCURRENT` defaults to 8 and is capped at 32.
+
+### Streamlit Cloud hang fix
+
+The imported app used 300 concurrent DNS/WHOIS/SMTP workers, performed WHOIS by default, started duplicate catch-all probes for the same domain, and installed a forced autorefresh. On constrained Streamlit Cloud instances, that combination can exhaust threads/sockets and make a run appear frozen. The app now:
+
+- uses 8 workers by default instead of 300 (configurable with `STREAMLIT_MAX_CONCURRENT`)
+- disables slow WHOIS/company/domain-age lookups by default while keeping them available as an option
+- serializes catch-all detection per domain so a Gmail batch does not open the same probe hundreds of times
+- removes the forced rerun timer and lets Streamlit Cloud manage app sleep/wake
+
+Direct SMTP validation still needs outbound TCP port 25. Some hosted platforms block it; those checks then return invalid/unknown after their bounded timeout rather than hanging the app indefinitely.

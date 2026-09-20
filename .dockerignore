@@ -3,3 +3,6 @@ vendor
 .env.v2
 storage/logs/*
 storage/app/v2/*
+.venv
+__pycache__
+*.pyc

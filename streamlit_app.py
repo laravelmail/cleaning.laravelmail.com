@@ -14,14 +14,10 @@ import yagmail
 import time
 import random
 import math
-from streamlit_autorefresh import st_autorefresh  # NEW: anti-idle autorefresh
-
-# ─────────────────────────────────────────────
-# NEW: Anti-Idle Keep-Alive (240 min = 14400 s)
-# Fires a silent refresh every 14 400 000 ms (4 h) so the Streamlit
-# server never goes idle while a long validation is running.
-# ─────────────────────────────────────────────
-st_autorefresh(interval=14_400_000, limit=None, key="keep_alive_refresh")
+import os
+import threading
+# Streamlit Cloud manages sleeping/waking itself. A forced periodic rerun can interrupt
+# long batches and make the UI look stuck, so no autorefresh loop is installed.
 
 # --- Configs ---
 # Default lists for disposable domains and role-based prefixes
@@ -41,7 +37,7 @@ DEFAULT_SMTP_HOST = "smtp.gmail.com"
 DEFAULT_SMTP_PORT = 587
 
 # NEW: max_concurrent=1 — all thread pools will use this value
-MAX_CONCURRENT = 300
+MAX_CONCURRENT = max(1, min(32, int(os.getenv("STREAMLIT_MAX_CONCURRENT", "8"))))
 
 # Caching for DNS MX records and WHOIS lookups to improve performance on repeat queries
 mx_cache = {}
@@ -51,6 +47,8 @@ mx_provider_cache = {}  # NEW: cache for MX provider detection
 # NEW: caches for domain aging and SMTP response codes
 domain_age_cache = {}       # registrable_domain → dict with creation_date, age_days, age_label
 smtp_code_cache = {}        # email → int SMTP response code (or None)
+catchall_locks = {}          # domain → lock; prevents duplicate probes in concurrent batches
+catchall_locks_guard = threading.Lock()
 
 
 # ─────────────────────────────────────────────
@@ -306,7 +304,15 @@ def detect_catch_all(registrable_domain: str) -> bool | None:
     """
     if registrable_domain in catchall_cache:
         return catchall_cache[registrable_domain]
+    with catchall_locks_guard:
+        domain_lock = catchall_locks.setdefault(registrable_domain, threading.Lock())
+    with domain_lock:
+        if registrable_domain in catchall_cache:
+            return catchall_cache[registrable_domain]
+        return _detect_catch_all_uncached(registrable_domain)
 
+
+def _detect_catch_all_uncached(registrable_domain: str) -> bool | None:
     # Build a fake address that is vanishingly unlikely to exist
     random_token = "".join(random.choices("abcdefghijklmnopqrstuvwxyz0123456789", k=14))
     fake_address = f"xprobe_{random_token}@{registrable_domain}"
@@ -457,10 +463,11 @@ def validate_email(email, disposable_domains, role_based_prefixes, enable_compan
     result["MX Provider"] = detect_mx_provider(registrable_domain)
 
     # NEW: 5b. Domain Aging
-    age_info = get_domain_age(registrable_domain)
-    result["Domain Created"] = age_info["creation_date"]
-    result["Domain Age"] = age_info["age_label"]
-    result["Domain Age (days)"] = age_info["age_days"]
+    if enable_company_lookup:
+        age_info = get_domain_age(registrable_domain)
+        result["Domain Created"] = age_info["creation_date"]
+        result["Domain Age"] = age_info["age_label"]
+        result["Domain Age (days)"] = age_info["age_days"]
 
     # 6. SMTP Verification (now captures raw code)
     if result["MX Record"] and not result["Disposable"]:
@@ -869,8 +876,9 @@ with config_col:
             st.write("Customize lists for email classification and enable/disable optional lookups.")
 
             enable_company_lookup = st.checkbox(
-                "Enable Company/Organization Lookup (WHOIS)",
-                value=True,
+                "Enable Company/Organization + domain-age lookup (WHOIS)",
+                value=False,
+                help="WHOIS servers can be slow or unavailable from Streamlit Cloud. Leave this off for fast validation.",
             )
             if not enable_company_lookup:
                 st.info("Company/Organization Lookup is currently disabled.")
