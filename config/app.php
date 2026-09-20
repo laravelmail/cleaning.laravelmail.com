@@ -5,5 +5,5 @@ return [
  'timezone'=>'UTC','locale'=>'en','fallback_locale'=>'en','faker_locale'=>'en_US',
  'key'=>env('V2_APP_KEY'),'cipher'=>'AES-256-CBC',
  'maintenance'=>['driver'=>'file'],
- 'providers'=>[App\Providers\AppServiceProvider::class],
+ 'providers'=>Illuminate\Support\ServiceProvider::defaultProviders()->merge([App\Providers\AppServiceProvider::class])->toArray(),
 ];
