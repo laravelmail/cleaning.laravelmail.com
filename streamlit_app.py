@@ -7,10 +7,8 @@ import pandas as pd
 import streamlit as st
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections import Counter
-import whois
 from email_validator import validate_email as validate_syntax_strict, EmailNotValidError
 import tldextract
-import yagmail
 import time
 import random
 import math
@@ -122,6 +120,10 @@ def detect_mx_provider(registrable_domain: str) -> str:
     return "Unknown / Self-hosted"
 
 
+# Use the package snapshot only. The default tldextract path can block while
+# downloading the Public Suffix List on a restricted Streamlit Cloud network.
+_TLD_EXTRACT = tldextract.TLDExtract(suffix_list_urls=())
+
 # --- Helper Function for Domain Extraction ---
 def get_registrable_domain(email_or_domain_string):
     """
@@ -134,7 +136,7 @@ def get_registrable_domain(email_or_domain_string):
         else:
             domain_part = email_or_domain_string
 
-        extracted = tldextract.extract(domain_part)
+        extracted = _TLD_EXTRACT(domain_part)
         if extracted.domain and extracted.suffix:
             return f"{extracted.domain}.{extracted.suffix}"
         elif extracted.domain:
@@ -194,6 +196,7 @@ def get_domain_age(registrable_domain: str) -> dict:
 
     result = {"creation_date": "N/A", "age_days": -1, "age_label": "Unknown"}
     try:
+        import whois
         w = whois.whois(registrable_domain)
         creation = w.creation_date
         if isinstance(creation, list):
@@ -358,6 +361,7 @@ def get_domain_info(registrable_domain):
     company_name = "N/A"
 
     try:
+        import whois
         w = whois.whois(registrable_domain)
         if hasattr(w, 'organization') and w.organization:
             company_name = w.organization if isinstance(w.organization, str) else w.organization[0]
@@ -399,7 +403,7 @@ def calculate_deliverability_score(result):
 
 
 # --- Main Validation Logic ---
-def validate_email(email, disposable_domains, role_based_prefixes, enable_company_lookup):
+def validate_email(email, disposable_domains, role_based_prefixes, enable_company_lookup, enable_smtp_checks=False):
     """
     Performs a comprehensive validation of a single email address.
     Now also runs:
@@ -432,7 +436,7 @@ def validate_email(email, disposable_domains, role_based_prefixes, enable_compan
     if not is_valid_syntax(email):
         result["Verdict"] = "❌ Invalid Syntax"
         result["Company/Org"] = "N/A (Invalid Syntax)"
-        result["Score"] = calculate_deliverability_score(result)
+        result["Score"] = calculate_deliverability_score(result) if enable_smtp_checks else (100 if result["Syntax Valid"] and result["MX Record"] and not result["Disposable"] else calculate_deliverability_score(result))
         return result
     result["Syntax Valid"] = True
 
@@ -470,7 +474,7 @@ def validate_email(email, disposable_domains, role_based_prefixes, enable_compan
         result["Domain Age (days)"] = age_info["age_days"]
 
     # 6. SMTP Verification (now captures raw code)
-    if result["MX Record"] and not result["Disposable"]:
+    if enable_smtp_checks and result["MX Record"] and not result["Disposable"]:
         smtp_valid, smtp_code = verify_smtp_with_code(email, registrable_domain)
         result["SMTP Valid"] = smtp_valid
         result["SMTP Code"] = smtp_code
@@ -479,7 +483,7 @@ def validate_email(email, disposable_domains, role_based_prefixes, enable_compan
         result["SMTP Code"] = None
 
     # 6b. Catch-All Detection (only when MX is present and domain is not disposable)
-    if result["MX Record"] and not result["Disposable"]:
+    if enable_smtp_checks and result["MX Record"] and not result["Disposable"]:
         catchall_outcome = detect_catch_all(registrable_domain)
         if catchall_outcome is True:
             result["Catch-All"] = "✅ Yes"
@@ -495,6 +499,8 @@ def validate_email(email, disposable_domains, role_based_prefixes, enable_compan
         result["Verdict"] = "⚠️ Disposable"
     elif result["Role-based"]:
         result["Verdict"] = "ℹ️ Role-based"
+    elif not enable_smtp_checks and result["Syntax Valid"] and result["MX Record"]:
+        result["Verdict"] = "✅ Valid (DNS only)"
     elif all([result["Syntax Valid"], result["MX Record"], result["SMTP Valid"]]):
         if result.get("Catch-All") == "✅ Yes":
             result["Verdict"] = "⚠️ Valid (Catch-All)"
@@ -503,7 +509,7 @@ def validate_email(email, disposable_domains, role_based_prefixes, enable_compan
     else:
         result["Verdict"] = "❌ Invalid"
 
-    result["Score"] = calculate_deliverability_score(result)
+    result["Score"] = calculate_deliverability_score(result) if enable_smtp_checks else (100 if result["Syntax Valid"] and result["MX Record"] and not result["Disposable"] else calculate_deliverability_score(result))
     return result
 
 
@@ -579,6 +585,7 @@ def build_smtp_code_df(results: list[dict]) -> pd.DataFrame:
 # --- Email Sending Function ---
 def send_email_via_yagmail(sender_email, sender_password, recipient_email, subject, body, smtp_host, smtp_port):
     try:
+        import yagmail
         if not sender_email or not sender_password or not recipient_email or not subject or not body:
             return False, "All sender email, password, recipient, subject, and body fields are required."
 
@@ -883,6 +890,14 @@ with config_col:
             if not enable_company_lookup:
                 st.info("Company/Organization Lookup is currently disabled.")
 
+            enable_smtp_checks = st.checkbox(
+                "Deep SMTP mailbox + catch-all checks",
+                value=False,
+                help="Opt in only when your host allows outbound port 25. Streamlit Community Cloud commonly blocks it. Fast mode still checks syntax, disposable/role rules, MX and provider.",
+            )
+            if not enable_smtp_checks:
+                st.info("Fast cloud-safe mode: SMTP and catch-all probes are skipped. Enable deep checks only on a host with outbound port 25.")
+
             st.markdown("---")
             disposable_input = st.text_area(
                 "Disposable Domains (comma or newline separated):",
@@ -1006,7 +1021,7 @@ with tab_validator:
 
                     with ThreadPoolExecutor(max_workers=MAX_CONCURRENT) as executor:
                         futures = {
-                            executor.submit(validate_email, email, disposable_domains_set, role_based_prefixes_set, enable_company_lookup): email
+                            executor.submit(validate_email, email, disposable_domains_set, role_based_prefixes_set, enable_company_lookup, enable_smtp_checks): email
                             for email in emails_to_validate
                         }
 
@@ -1199,7 +1214,7 @@ with tab_batch_csv:
                         futures = {
                             executor.submit(
                                 validate_email, email,
-                                disposable_domains_set, role_based_prefixes_set, enable_company_lookup
+                                disposable_domains_set, role_based_prefixes_set, enable_company_lookup, enable_smtp_checks
                             ): email
                             for email in emails_to_validate
                         }
@@ -1430,7 +1445,7 @@ with tab_gmail_batch:
                             futures = {
                                 executor.submit(
                                     validate_email, email,
-                                    disposable_domains_set, role_based_prefixes_set, enable_company_lookup
+                                    disposable_domains_set, role_based_prefixes_set, enable_company_lookup, enable_smtp_checks
                                 ): email
                                 for email in emails_to_validate_gmail
                             }
@@ -1833,7 +1848,7 @@ with tab_permutator:
 
                     with ThreadPoolExecutor(max_workers=MAX_CONCURRENT) as executor:
                         futures = {
-                            executor.submit(validate_email, email, disposable_domains_set, role_based_prefixes_set, enable_company_lookup): email
+                            executor.submit(validate_email, email, disposable_domains_set, role_based_prefixes_set, enable_company_lookup, enable_smtp_checks): email
                             for email in generated_emails_raw
                         }
 
