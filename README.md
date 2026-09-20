@@ -123,3 +123,9 @@ The imported app used 300 concurrent DNS/WHOIS/SMTP workers, performed WHOIS by 
 - removes the forced rerun timer and lets Streamlit Cloud manage app sleep/wake
 
 Direct SMTP validation still needs outbound TCP port 25. Some hosted platforms block it; those checks then return invalid/unknown after their bounded timeout rather than hanging the app indefinitely.
+
+### Streamlit Community Cloud execution modes
+
+The default is now **Fast cloud-safe mode**. It performs syntax, disposable/role, MX and provider checks without opening direct SMTP port-25 connections. Enable "Deep SMTP mailbox + catch-all checks" only on infrastructure where outbound port 25 is confirmed. Streamlit Community Cloud commonly restricts that port, which can otherwise make every address wait on two network timeouts.
+
+WHOIS and the SMTP-sending library are imported only after their opt-in actions are used. Registrable-domain extraction uses the packaged Public Suffix List snapshot and never downloads data during a Streamlit session. CI now starts the app through Streamlit's real session test harness and checks that the six-tab UI renders in under ten seconds with both external-network modes off.
